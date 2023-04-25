@@ -316,30 +316,27 @@ def _write_postgis(
     # Convert geometries to EWKB
     gdf = _convert_to_ewkb(gdf, geom_name, srid)
 
+    from sqlalchemy import text
     if if_exists == "append":
-        # Check that the geometry srid matches with the current GeoDataFrame
-        with con.begin() as connection:
-            if schema is not None:
-                schema_name = schema
-            else:
-                schema_name = "public"
+            # Check that the geometry srid matches with the current GeoDataFrame
+            with _get_conn(con) as connection:
+                # Only check SRID if table exists
+                if connection.dialect.has_table(connection, name, schema):
+                    
+                    target_srid = connection.execute(
+                        text("SELECT Find_SRID('{schema}', '{table}', '{geom_col}');".format(
+                            schema=schema_name, table=name, geom_col=geom_name
+                        ))
+                    ).fetchone()[0]
 
-            # Only check SRID if table exists
-            if connection.run_callable(connection.dialect.has_table, name, schema):
-                target_srid = connection.execute(
-                    "SELECT Find_SRID('{schema}', '{table}', '{geom_col}');".format(
-                        schema=schema_name, table=name, geom_col=geom_name
-                    )
-                ).fetchone()[0]
-
-                if target_srid != srid:
-                    msg = (
-                        "The CRS of the target table (EPSG:{epsg_t}) differs from the "
-                        "CRS of current GeoDataFrame (EPSG:{epsg_src}).".format(
-                            epsg_t=target_srid, epsg_src=srid
+                    if target_srid != srid:
+                        msg = (
+                            "The CRS of the target table (EPSG:{epsg_t}) differs from the "
+                            "CRS of current GeoDataFrame (EPSG:{epsg_src}).".format(
+                                epsg_t=target_srid, epsg_src=srid
+                            )
                         )
-                    )
-                    raise ValueError(msg)
+                        raise ValueError(msg)
 
     with con.begin() as connection:
 
